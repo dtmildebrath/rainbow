@@ -174,7 +174,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     settings = {
-        "clique_method": "ostergard",
+        "clique_method": "ostergard" if args.init_fix == "clique" else None,
         "init_fix": args.init_fix,
         "init_paths": None,
     }
