@@ -1,5 +1,7 @@
 Copyright 2020 David T. Mildebrath, Logan A. Smith
 
+This code is accomponied by [this paper](https://arxiv.org/abs/2006.02988).
+
 # Strong Rainbow Connection (SRC)
 
 This code provides several methods for computing the strong rainbow connection
