@@ -25,6 +25,23 @@ import math
 
 
 def src_BnC(G, settings):
+    """ Compute src(G) for the specified graph using branch-and-cut.
+
+    Args:
+        G (networkx.Graph):
+            A simple, connected graph.
+        settings (dict):
+            Dictionary of settings to control the solution. See the
+            documentation for `src.check_settings` for details.
+
+    Returns:
+        float or None:
+            Returns src(G) is computed successfully, otherwise None.
+
+    Notes:
+        - This function requires the settings dict to contain a key `timeout`
+          pointing to a float equal to the maximum run time in seconds.
+    """
     start_time = time.time()
     max_time = settings["timeout"]
     check_settings(G, settings)
@@ -76,6 +93,23 @@ def src_BnC(G, settings):
 
 
 def src_bottom_up(G, settings):
+    """ Compute src(G) for the specified graph using the "bottom-up" approach.
+
+    Args:
+        G (networkx.Graph):
+            A simple, connected graph.
+        settings (dict):
+            Dictionary of settings to control the solution. See the
+            documentation for `src.check_settings` for details.
+
+    Returns:
+        float or None:
+            Returns src(G) is computed successfully, otherwise None.
+
+    Notes:
+        - This function requires the settings dict to contain a key `timeout`
+          pointing to a float equal to the maximum run time in seconds.
+    """
     start_time = time.time()
     max_time = settings["timeout"]
     check_settings(G, settings)
@@ -125,6 +159,30 @@ def src_bottom_up(G, settings):
 
 
 def build_model(G, settings):
+    """ Build the IP model for computing src(G).
+
+    Args:
+        G (networkx.Graph):
+            A simple, connected graph.
+        settings (dict):
+            Dictionary of settings to control the solution. See the
+            documentation for `src.check_settings` for details.
+
+    Returns:
+        gurobipy.Model:
+            The resulting IP model.
+
+    Notes:
+        - This function manually sets the LP solution method to be dual
+          simplex, in order to prevent the barrier method from being used. In
+          practice the dual simplex method is much more effective for this
+          problem.
+        - The user may specifiy an `init_paths` key in the settings dict. This
+          key should point to another dict which maps (u,v) vertex pairs to
+          list of paths which the model may select from. If `init_paths` is not
+          specified (or is missing a vertex pair), the set of all shortest
+          (u,v) is explicitly computed using networkx.
+    """
     required_attrs = ["vertex_pairs", "ordered_edges"]
     for attr in required_attrs:
         if not hasattr(G, attr):
@@ -307,6 +365,21 @@ def bottom_up_no_cut_callback(model, where):
 
 
 def check_settings(G, settings):
+    """ Check the provided settings dictionary for errors and fill in defaults.
+
+    Args:
+        G (networkx.Graph):
+            Simple connected graph.
+        settings (dict):
+            Dictionary containing settings options.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError:
+            If the input is malformed.
+    """
     defaults = {
         "K": G.order() - 1,
         "init_paths": dict(),  # i.e. all of them
@@ -337,6 +410,8 @@ def check_settings(G, settings):
 
 
 def graph_preprocessing(G, settings):
+    """ Perform various preprocessing steps required for all solution methods.
+    """
     # Build auxiliary cut graph, get skip pairs (among other things)
     prepr.presolve(G)
 
