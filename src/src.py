@@ -57,7 +57,11 @@ def src_BnC(G, settings):
         if "num_heur_trials" in settings and settings["num_heur_trials"] is not None:
             num_heur_trials = settings["num_heur_trials"]
         start = time.time()
+        if settings["verbose"]:
+            print("Beginning heuristic...", end="", flush=True)
         _, bound = heur.path_fixing_heuristic(G, num_trials=num_heur_trials)
+        if settings["verbose"]:
+            print("done.")
         end = time.time()
         settings["K"] = bound
         if settings["verbose"]:
@@ -413,7 +417,11 @@ def graph_preprocessing(G, settings):
     """ Perform various preprocessing steps required for all solution methods.
     """
     # Build auxiliary cut graph, get skip pairs (among other things)
+    if settings["verbose"]:
+        print("Calling prepr.presolve...", end="", flush=True)
     prepr.presolve(G)
+    if settings["verbose"]:
+        print("done.")
 
     # Build C/C++ graphs as necessary
     if settings["clique_method"] == "ILS_VND":
