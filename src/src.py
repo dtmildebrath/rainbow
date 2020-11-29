@@ -103,11 +103,12 @@ def src_BnC(
         G.Hc = clique.build_c_graph(G)
 
     # Compute an initial set of edges to fix
-    G.init_fix = fix_initial_edge_set(
-        G,
-        fix_method=fix_method,
-        clique_method=clique_method,
-    )
+    if fix_method.lower() != "none":
+        G.init_fix = fix_initial_edge_set(
+            G,
+            fix_method=fix_method,
+            clique_method=clique_method,
+        )
 
     # If desired, fix a random path for each pair of vertices
     # (used for producing a heuristic solution)
@@ -251,11 +252,12 @@ def src_bottom_up(
         G.Hc = clique.build_c_graph(G)
 
     # Compute an initial set of edges to fix
-    G.init_fix = fix_initial_edge_set(
-        G,
-        fix_method=fix_method,
-        clique_method=clique_method,
-    )
+    if fix_method.lower() != "none":
+        G.init_fix = fix_initial_edge_set(
+            G,
+            fix_method=fix_method,
+            clique_method=clique_method,
+        )
 
     # If desired, fix a random path for each pair of vertices
     # (used for producing a heuristic solution)
@@ -605,10 +607,11 @@ def fix_initial_edge_set(
             List of edges which must be different colors in any valid strong
             rainbow coloring.
     """
-    if clique_method not in ("brute", "ostergard", "ILS_VND"):
-        raise ValueError(f"Unrecognized value `{clique_method}` passed for clique_method")
-    if fix_method not in ("lusp", "clique"):
+    if fix_method not in ("lusp", "clique", "none"):
         raise ValueError(f"Unrecognized value `{init_fix}` passed for fix_method")
+    if fix_method == "clique":
+        if clique_method not in ("brute", "ostergard", "ILS_VND"):
+            raise ValueError(f"Unrecognized value `{clique_method}` passed for clique_method")
 
     if fix_method == "lusp":
         initial_edges = prepr.find_longest_unique_shortest_path(G)

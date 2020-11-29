@@ -27,21 +27,27 @@ def main():
     path = "../graphs"
     inst_list = prepr.read_instance_names("insts.txt")
 
-    settings = {
-        "clique_method": "ostergard",
-        "init_fix": "clique",
-        "init_paths": None,
-    }
-
     print("Instance,Bound,Trials,Time(s)")
     for fname in inst_list:
         G = prepr.build_graph_from_file(f"{path}/{fname}")
-        src.graph_preprocessing(G, settings)
+
+        # Prepare the graph G
+        prepr.presolve(G)
+        G.Hc = clique.build_c_graph(G)
+        G.init_fix = src.fix_initial_edge_set(
+            G,
+            fix_method="clique",
+            clique_method="ostergard",
+        )
+
+        # Run the heuristic
         num_trials = math.ceil(G.order() / 5)
         t0 = time.time()
         _, rc = heur.path_fixing_heuristic(G, num_trials=num_trials)
         t1 = time.time()
         print(f"{fname},{rc},{num_trials},{t1-t0}")
+
+        # Clean up
         clique.free_graph(G.Hc)
 
 

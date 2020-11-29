@@ -55,8 +55,8 @@ def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="cliqu
             raise RuntimeError(
                 f"Graph must have a '{attr}' attribute before running path fixing heuristic"
             )
-    if fmethod not in ("clique", "path"):
-        raise ValueError("fmethod must `clique` or `path`")
+    if fmethod not in ("clique", "lusp"):
+        raise ValueError("fmethod must `clique` or `lusp`")
 
     best_bound = G.size()+1
     best_paths = {pair:0 for pair in G.vertex_pairs}
@@ -95,7 +95,7 @@ def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="cliqu
                 path_ix = random.randint(0, len(shortest_paths[u,v])-1)
                 path_fixing[u,v] = shortest_paths[u,v][path_ix]
 
-        if fmethod == "path":
+        if fmethod == "lusp":
             # Fix colors along some longest path
             for (u,v) in G.vertex_pairs:
                 if len(path_fixing[u,v]) == diam:
@@ -191,6 +191,7 @@ if __name__ == "__main__":
     import src
     import argparse
     import math
+    import clique
 
     parser = argparse.ArgumentParser(
         description="Produce a valid strong rainbow coloring of G, which is an upper bound on src(G)"
@@ -207,7 +208,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-x", "--init-fix", type=str, default="clique",
-        choices=["clique", "path"],
+        choices=["clique", "lusp", "none"],
         help="Type of initial edge fixing to use. Default is `clique`."
     )
     parser.add_argument(
@@ -222,21 +223,25 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    settings = {
-        "clique_method": "ostergard" if args.init_fix == "clique" else None,
-        "init_fix": args.init_fix,
-        "init_paths": None,
-    }
-
+    # Prepare the graph
     G = prepr.build_graph_from_file(args.filename)
     if args.verbose:
         print("Starting preprocessing...", end="", flush=True)
-    src.graph_preprocessing(G, settings)
+    prepr.presolve(G)
+    G.Hc = clique.build_c_graph(G)
+    G.init_fix = src.fix_initial_edge_set(
+        G,
+        fix_method=args.init_fix,
+        clique_method="ostergard" if args.init_fix == "clique" else None,
+    )
     if args.verbose:
         print("done.")
 
     if args.trials is None:
         args.trials = math.ceil(G.order() / 5)
+
+    if args.init_fix == "clique":
+        clique.free_graph(G.Hc)
 
     start = time.time()
     cmap, rc = path_fixing_heuristic(

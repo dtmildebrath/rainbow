@@ -35,7 +35,7 @@ def run_tests() :
     graph_statistics = 1
     verbose = 1
 
-    times = {inst:{} for inst in inst_list}
+    times = {inst: dict() for inst in inst_list}
 
     for inst in inst_list :
         print(f"\n##############################################################\n")
@@ -45,121 +45,92 @@ def run_tests() :
         heur_bound = heur_bounds[inst]["bound"]
         heur_time = heur_bounds[inst]["time"]
 
-        if test_bottom_up_cuts :
-            settings = {
-                "K": None,
-                "init_paths": None,  # None means add all shortest paths
-                "add_symmetry_breaking": True,
-                "GRB_symmetry_breaking": False,
-                "init_fix": "clique",
-                "clique_method": "ostergard",
-                "skip_dominated_pairs": True,
-                "add_clique_cuts": True,
-                "GRB_verbose": verbose,
-                "timeout": time_limit
-            }
+        if test_bottom_up_cuts:
             start = time.time()
-            sol = src.src_bottom_up(G, settings)
+            sol = src.src_bottom_up(
+                G,
+                max_time=time_limit,
+                gurobi_verbose=verbose,
+                verbose=verbose,
+                add_clique_cuts=True,
+            )
             end = time.time()
             times[inst]["bottom_up_cuts"] = end-start
-            if sol is not None :
-                if src_val is not None and sol != src_val :
+            if sol is not None:
+                if src_val is not None and sol != src_val:
                     print(f"METHODS RETURNED DIFFERENT SOLUTIONS: {src_val} and {sol}")
                 src_val = sol
-            if sol is None :
+            if sol is None:
                 print("--- Method: bottom_up_cuts Timed Out!")
 
-        if test_bottom_up_no_cuts :
-            settings = {
-                "K": None,
-                "init_paths": None,  # None means add all shortest paths
-                "add_symmetry_breaking": True,
-                "GRB_symmetry_breaking": False,
-                "init_fix": "clique",
-                "clique_method": "ostergard",
-                "skip_dominated_pairs": True,
-                "add_clique_cuts": False,
-                "GRB_verbose": verbose,
-                "timeout": time_limit
-            }
+        if test_bottom_up_no_cuts:
             start = time.time()
-            sol = src.src_bottom_up(G, settings)
+            sol = src.src_bottom_up(
+                G,
+                max_time=time_limit,
+                gurobi_verbose=verbose,
+                verbose=verbose,
+                add_clique_cuts=False,
+            )
             end = time.time()
             times[inst]["bottom_up_no_cuts"] = end-start
-            if sol is not None :
-                if src_val is not None and sol != src_val :
+            if sol is not None:
+                if src_val is not None and sol != src_val:
                     print(f"METHODS RETURNED DIFFERENT SOLUTIONS: {src_val} and {sol}")
                 src_val = sol
-            if sol is None :
+            if sol is None:
                 print("--- Method: bottom_up_no_cuts Timed Out!")
 
-        if test_BnC_cuts :
-            settings = {
-                "K": None,
-                "init_paths": None,  # None means add all shortest paths
-                "add_symmetry_breaking": True,
-                "GRB_symmetry_breaking": False,
-                "init_fix": "clique",
-                "clique_method": "ostergard",
-                "skip_dominated_pairs": True,
-                "add_clique_cuts": True,
-                "GRB_verbose": verbose,
-                "timeout": time_limit,
-                "heur_bound": heur_bound,
-            }
+        if test_BnC_cuts:
             start = time.time()
-            sol = src.src_BnC(G, settings)
+            sol = src.src_BnC(
+                G,
+                max_time=time_limit,
+                gurobi_verbose=verbose,
+                verbose=verbose,
+                add_clique_cuts=True,
+                heur_bound=heur_bound,
+            )
             end = time.time()
             times[inst]["BnC_cuts"] = end-start+heur_time
-            if sol is not None :
-                if src_val is not None and sol != src_val :
+            if sol is not None:
+                if src_val is not None and sol != src_val:
                     print(f"METHODS RETURNED DIFFERENT SOLUTIONS: {src_val} and {sol}")
                 src_val = sol
-            if sol is None :
+            if sol is None:
                 print("--- Method: BnC_cuts Timed Out!")
 
 
-        if test_BnC_no_cuts :
-            settings = {
-                "K": None,
-                "init_paths": None,  # None means add all shortest paths
-                "add_symmetry_breaking": True,
-                "GRB_symmetry_breaking": False,
-                "init_fix": "clique",
-                "clique_method": "ostergard",
-                "skip_dominated_pairs": True,
-                "add_clique_cuts": False,
-                "GRB_verbose": verbose,
-                "timeout": time_limit,
-                "heur_bound": heur_bound,
-            }
+        if test_BnC_no_cuts:
             start = time.time()
-            sol = src.src_BnC(G, settings)
+            sol = src.src_BnC(
+                G,
+                max_time=time_limit,
+                gurobi_verbose=verbose,
+                verbose=verbose,
+                add_clique_cuts=False,
+                heur_bound=heur_bound,
+            )
             end = time.time()
             times[inst]["BnC_no_cuts"] = end-start+heur_time
-            if sol is not None :
-                if src_val is not None and sol != src_val :
+            if sol is not None:
+                if src_val is not None and sol != src_val:
                     print(f"METHODS RETURNED DIFFERENT SOLUTIONS: {src_val} and {sol}")
                 src_val = sol
-            if sol is None :
+            if sol is None:
                 print("--- Method: BnC_no_cuts Timed Out!")
 
         if test_BnC_naive :
-            settings = {
-                "K": None,
-                "init_paths": None,  # None means add all shortest paths
-                "add_symmetry_breaking": True,
-                "GRB_symmetry_breaking": False,
-                "init_fix": "none",
-                "clique_method": "none",
-                "skip_dominated_pairs": False,
-                "add_clique_cuts": False,
-                "GRB_verbose": verbose,
-                "timeout": time_limit,
-                "heur_bound": heur_bound,
-            }
             start = time.time()
-            sol = src.src_BnC(G, settings)
+            sol = src.src_BnC(
+                G,
+                max_time=time_limit,
+                fix_method="none",
+                gurobi_verbose=verbose,
+                verbose=verbose,
+                break_symmetry=True, # Does this count as naive?
+                heur_bound=heur_bound,
+            )
             end = time.time()
             times[inst]["BnC_naive"] = end-start+heur_time
             if sol is not None :
@@ -169,7 +140,7 @@ def run_tests() :
             if sol is None :
                 print("--- Method: BnC_naive Timed Out!")
 
-        if graph_statistics :
+        if graph_statistics:
             src.graph_statistics(G)
             if src_val is not None :
                 print(f"Graph src: {int(src_val)}")
@@ -180,10 +151,10 @@ def run_tests() :
         print(f"\n##############################################################\n\n")
 
 
-def print_results(test_insts, times) :
-    for inst in test_insts :
+def print_results(test_insts, times):
+    for inst in test_insts:
         print(f"\nInstance {inst}:")
-        for method in times[inst] :
+        for method in times[inst]:
             print(f"\t {method}: \t {times[inst][method]:.4f}")
 
 
