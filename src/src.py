@@ -24,153 +24,345 @@ import time
 import math
 
 
-def src_BnC(G, settings):
+def src_BnC(
+    G,
+    max_time=3600,
+    clique_method="ostergard",
+    fix_method="clique",
+    heuristic_path_fixing=False,
+    gurobi_verbose=False,
+    verbose=False,
+    add_clique_cuts=False,
+    print_computed_solution=False,
+    break_symmetry=True,
+    heur_bound=None,
+    num_heur_trials=None,
+):
     """ Compute src(G) for the specified graph using branch-and-cut.
 
     Args:
         G (networkx.Graph):
             A simple, connected graph.
-        settings (dict):
-            Dictionary of settings to control the solution. See the
-            documentation for `src.check_settings` for details.
+        max_time (int, optional):
+            Maximum computational time allowed in seconds. Default is 3600.
+        clique_method (str, optional):
+            Method used to find cliques in the auxiliary graph H. Must be one
+            of the following:
+            - `brute`: Enumerate all cliques by brute force and select the
+              largest one.
+            - `ostergard`: Find the largest clique using the branch-and-bound
+              method of Ostergard (aka cliquer).
+            - `ILS_VND`: Heuristically look for the largest clique using the
+              ILS_VND heuristic.
+            Default is `ostergard`.
+        fix_method (str, optional):
+            Method used to fix an initial set of edges in the model. Must be
+            one of the following:
+            - `lusp`: Fix every edge in a longest unique shortest path.
+            - `clique`: Fix every edge corresponding to a clique in the
+              auxiliary graph H.
+            - `none`: No initial set of edges is fixed.
+            Default is `clique`. 
+        heuristic_path_fixing (bool, optional):
+            If True, select one shortest path between each pair of vertices,
+            and only require that path to be rainbow colored in the result.
+            This produces a valid strong rainbow coloring of G, which may not
+            be minimum. Default is False.
+        gurobi_verbose (bool, optional):
+            If True, the Gurobi output flag is set to True. Default is False.
+        verbose (bool, optional):
+            If True, displays verbose output. Default is False.
+        add_clique_cuts (bool, optional):
+            If True, the Gurobi LazyConstraint parameter is set to True.
+            Default is False.
+        print_computed_solution (bool, optional):
+            If True, prints the solution. Default is False.
+        break_symmetry (bool, optional):
+            If True, add symmetry breaking constraints of the form z_k >=
+            z_{k+1} for all colors k. Default is True.
+        heur_bound (int, optional):
+            Valid upper bound on src(G). If none is specified, an upper bound
+            is obtained with the heuristic. Default is None (no bound).
+        num_heur_trials (int, optional):
+            Number of heuristic trials to run. Ignored if heur_bound is
+            specified. Default is ceil(n / 5).
+
 
     Returns:
         float or None:
             Returns src(G) is computed successfully, otherwise None.
-
-    Notes:
-        - This function requires the settings dict to contain a key `timeout`
-          pointing to a float equal to the maximum run time in seconds.
     """
     start_time = time.time()
-    max_time = settings["timeout"]
-    check_settings(G, settings)
-    graph_preprocessing(G, settings)
+    prepr.presolve(G)
+
+    # Build C/C++ graphs as necessary
+    if clique_method == "ILS_VND":
+        G.Hcpp = clique.build_cppgraph(G)
+        G.Hcpp.sort() # Is this necessary?
+    elif clique_method == "ostergard":
+        G.Hc = clique.build_c_graph(G)
+
+    # Compute an initial set of edges to fix
+    G.init_fix = fix_initial_edge_set(
+        G,
+        fix_method=fix_method,
+        clique_method=clique_method,
+    )
+
+    # If desired, fix a random path for each pair of vertices
+    # (used for producing a heuristic solution)
+    init_paths = None
+    if heuristic_path_fixing:
+        init_paths = {
+            (u, v): (nx.shortest_path(G, source=u, target=v),)
+            for (u, v) in G.vertex_pairs
+        }
 
     # Run the heuristic
-    heur_bound = None
-    if "heur_bound" in settings:
-        heur_bound = settings["heur_bound"]
-
     if heur_bound is None:
-        num_heur_trials = math.ceil(G.order() / 5)
-        if "num_heur_trials" in settings and settings["num_heur_trials"] is not None:
-            num_heur_trials = settings["num_heur_trials"]
+        if num_heur_trials is None:
+            num_heur_trials = math.ceil(G.order() / 5)
+
         start = time.time()
-        if settings["verbose"]:
+        if verbose:
             print("Beginning heuristic...", end="", flush=True)
         _, bound = heur.path_fixing_heuristic(G, num_trials=num_heur_trials)
-        if settings["verbose"]:
+        if verbose:
             print("done.")
         end = time.time()
-        settings["K"] = bound
-        if settings["verbose"]:
+        K = bound
+        if verbose:
             print(f"Heuristic provides an upper bound of {bound}, in {end - start:.4f} seconds.")
     else:
-        settings["K"] = heur_bound
+        K = heur_bound 
 
-    time_elapsed = time.time() - start_time
-    settings["timeout"] = max(0, max_time - time_elapsed)
-    model = build_model(G, settings)
-    model_preprocessing(G, model, settings)
+    model = build_model(
+        G,
+        K,
+        break_symmetry=break_symmetry,
+        init_paths=init_paths,
+        gurobi_verbose=gurobi_verbose,
+        add_clique_cuts=add_clique_cuts,
+        gurobi_break_symmetry=False,
+    )
 
-    if settings["GRB_verbose"]:
+    # Fix the initial set of edges
+    if fix_method.lower() != "none":
+        fix_init_vars(G, model)
+        if verbose:
+            print(f"Number of edges fixed by init_fix: {len(G.init_fix)}")
+
+    if add_clique_cuts:
+        # This is used in the cut callback functions
+        model._clique_method = clique_method
+
+    if gurobi_verbose:
         print("\n################## BEGIN GUROBI OUTPUT #########################")
 
-    if settings["add_clique_cuts"] :
+    time_elapsed = time.time() - start_time
+    time_remaining = max(0, max_time - time_elapsed)
+    model.Params.TimeLimit = time_remaining
+
+    if add_clique_cuts:
         model.optimize(clique_callback)
-    else :
+    else:
         model.optimize()
 
-    if settings["GRB_verbose"]:
+    if gurobi_verbose:
         print("################### END GUROBI OUTPUT ##########################\n")
 
-    if settings["print_solution"]:
-        print_solution(G, model)
-
     ## THIS IS IMPORTANT! (Leaks otherwise)
-    if settings["clique_method"] == "ostergard":
+    if clique_method == "ostergard":
         clique.free_graph(G.Hc)
 
-    if model.Status == grb.GRB.Status.OPTIMAL :
+    if model.Status == grb.GRB.Status.OPTIMAL:
+        if print_computed_solution:
+            print_solution(G, model)
         return model.objval
 
 
-def src_bottom_up(G, settings):
+def src_bottom_up(
+    G,
+    max_time=3600,
+    clique_method="ostergard",
+    fix_method="clique",
+    heuristic_path_fixing=False,
+    gurobi_verbose=False,
+    verbose=False,
+    add_clique_cuts=False,
+    print_computed_solution=False,
+    break_symmetry=True,
+):
     """ Compute src(G) for the specified graph using the "bottom-up" approach.
 
     Args:
         G (networkx.Graph):
             A simple, connected graph.
-        settings (dict):
-            Dictionary of settings to control the solution. See the
-            documentation for `src.check_settings` for details.
+        max_time (int, optional):
+            Maximum computational time allowed in seconds. Default is 3600.
+        clique_method (str, optional):
+            Method used to find cliques in the auxiliary graph H. Must be one
+            of the following:
+            - `brute`: Enumerate all cliques by brute force and select the
+              largest one.
+            - `ostergard`: Find the largest clique using the branch-and-bound
+              method of Ostergard (aka cliquer).
+            - `ILS_VND`: Heuristically look for the largest clique using the
+              ILS_VND heuristic.
+            Default is `ostergard`.
+        fix_method (str, optional):
+            Method used to fix an initial set of edges in the model. Must be
+            one of the following:
+            - `lusp`: Fix every edge in a longest unique shortest path.
+            - `clique`: Fix every edge corresponding to a clique in the
+              auxiliary graph H.
+            - `none`: No initial set of edges is fixed.
+            Default is `clique`. 
+        heuristic_path_fixing (bool, optional):
+            If True, select one shortest path between each pair of vertices,
+            and only require that path to be rainbow colored in the result.
+            This produces a valid strong rainbow coloring of G, which may not
+            be minimum. Default is False.
+        gurobi_verbose (bool, optional):
+            If True, the Gurobi output flag is set to True. Default is False.
+        verbose (bool, optional):
+            If True, displays verbose output. Default is False.
+        add_clique_cuts (bool, optional):
+            If True, the Gurobi LazyConstraint parameter is set to True.
+            Default is False.
+        print_computed_solution (bool, optional):
+            If True, prints the solution. Default is False.
+        break_symmetry (bool, optional):
+            If True, add symmetry breaking constraints of the form z_k >=
+            z_{k+1} for all colors k. Default is True.
 
     Returns:
         float or None:
             Returns src(G) is computed successfully, otherwise None.
-
-    Notes:
-        - This function requires the settings dict to contain a key `timeout`
-          pointing to a float equal to the maximum run time in seconds.
     """
     start_time = time.time()
-    max_time = settings["timeout"]
-    check_settings(G, settings)
-    graph_preprocessing(G, settings)
-    settings["K"] = max(len(G.init_fix), G.diameter)
+    prepr.presolve(G)
 
-    model = build_model(G, settings)
-    model_preprocessing(G, model, settings)
+    # Build C/C++ graphs as necessary
+    if clique_method == "ILS_VND":
+        G.Hcpp = clique.build_cppgraph(G)
+        G.Hcpp.sort() # Is this necessary?
+    elif clique_method == "ostergard":
+        G.Hc = clique.build_c_graph(G)
+
+    # Compute an initial set of edges to fix
+    G.init_fix = fix_initial_edge_set(
+        G,
+        fix_method=fix_method,
+        clique_method=clique_method,
+    )
+
+    # If desired, fix a random path for each pair of vertices
+    # (used for producing a heuristic solution)
+    init_paths = None
+    if heuristic_path_fixing:
+        init_paths = {
+            (u, v): (nx.shortest_path(G, source=u, target=v),)
+            for (u, v) in G.vertex_pairs
+        }
+
+    K = max(len(G.init_fix), G.diameter)
+
+    model = build_model(
+        G,
+        K,
+        break_symmetry=break_symmetry,
+        init_paths=init_paths,
+        gurobi_verbose=gurobi_verbose,
+        add_clique_cuts=add_clique_cuts,
+        gurobi_break_symmetry=False,
+    )
+
+    # Fix the initial set of edges
+    if fix_method.lower() != "none":
+        fix_init_vars(G, model)
+        if verbose:
+            print(f"Number of edges fixed by init_fix: {len(G.init_fix)}")
+
+    if add_clique_cuts:
+        # This is used in the cut callback functions
+        model._clique_method = clique_method
 
     i = 0
     sol_found = False
     while not sol_found and time.time() - start_time < max_time:
         time_elapsed = time.time() - start_time
         model.Params.TimeLimit = max(max_time - time_elapsed, 0)
-        if settings["GRB_verbose"]:
+        if gurobi_verbose:
             print(f"\n\n################################################################")
             print(f"### Beginning Iteration: {i} #####################################")
             print(f"################################################################")
             print("\n################## BEGIN GUROBI OUTPUT #########################")
-        elif settings["verbose"]:
+        elif verbose:
             print("Beginning iteration", i)
 
-        if settings["add_clique_cuts"] :
+        if add_clique_cuts:
             model.optimize(bottom_up_clique_callback)
-        else :
+        else:
             model.optimize(bottom_up_no_cut_callback)
 
-        if settings["GRB_verbose"]:
+        if gurobi_verbose:
             print("################### END GUROBI OUTPUT ##########################\n")
 
-        if model.SolCount == 0 : # No solution found yet
+        sol_found = model.SolCount > 0
+        if not sol_found:
             i += 1
-            settings["K"] += 1
-            add_color(model) # No need to call model_preprocesing again
-
-        else :
-            sol_found = True
-            if settings["print_solution"]:
-                print_solution(G, model)
+            K += 1
+            add_color(model, break_symmetry=break_symmetry)
 
     ## THIS IS IMPORTANT! (Leaks otherwise)
-    if settings["clique_method"] == "ostergard":
+    if clique_method == "ostergard":
         clique.free_graph(G.Hc)
 
-    if sol_found :
+    if sol_found:
+        if print_computed_solution:
+            print_solution(G, model)
         return model.objval
 
 
-def build_model(G, settings):
+def build_model(
+    G,
+    K,
+    break_symmetry=True,
+    init_paths=None,
+    gurobi_verbose=False,
+    add_clique_cuts=False,
+    gurobi_break_symmetry=False,
+    timeout=None,
+):
     """ Build the IP model for computing src(G).
 
     Args:
         G (networkx.Graph):
-            A simple, connected graph.
-        settings (dict):
-            Dictionary of settings to control the solution. See the
-            documentation for `src.check_settings` for details.
+            A simple, connected graph. Must have attributes for `ordered_edges`
+            and `vertex_pairs`.
+        K (int):
+            The number of colors in the palette.
+        break_symmetry (bool, optional):
+            If True, add symmetry breaking constraints of the form z_k >=
+            z_{k+1} for all colors k. Default is True.
+        init_paths (dict, optional):
+            Dictionary mapping vertex pairs (u, v) to list of shortest (u, v)
+            paths in G. If init_paths[u, v] exists, then only those paths will
+            be added to the resulting IP model. If it does not, then _all_
+            shortest (u, v) paths in G will be included. Default is an empty
+            dictionary (i.e. all shortest (u, v) paths are included in the
+            model).
+        gurobi_verbose (bool, optional):
+            If True, the Gurobi output flag is set to True. Default is False.
+        add_clique_cuts (bool, optional):
+            If True, the Gurobi LazyConstraint parameter is set to True.
+            Default is False.
+        gurobi_break_symmetry (bool, optional):
+            If True, sets the Gurobi Symmetry parameter to 2. Default is False.
+        timeout (int, optional):
+            If specified, sets the Gurobi TimeLimit parameter (units of
+            seconds). Default is None (no time limit).
 
     Returns:
         gurobipy.Model:
@@ -181,11 +373,6 @@ def build_model(G, settings):
           simplex, in order to prevent the barrier method from being used. In
           practice the dual simplex method is much more effective for this
           problem.
-        - The user may specifiy an `init_paths` key in the settings dict. This
-          key should point to another dict which maps (u,v) vertex pairs to
-          list of paths which the model may select from. If `init_paths` is not
-          specified (or is missing a vertex pair), the set of all shortest
-          (u,v) is explicitly computed using networkx.
     """
     required_attrs = ["vertex_pairs", "ordered_edges"]
     for attr in required_attrs:
@@ -194,9 +381,12 @@ def build_model(G, settings):
                 f"Graph must have a '{attr}' attribute before building model"
             )
 
+    if init_paths is None:
+        init_paths = dict()
+
     model = grb.Model()
 
-    K = range(settings["K"])
+    K = range(K)
     x = model.addVars(G.ordered_edges, K, vtype=grb.GRB.BINARY, name="x")
     z = model.addVars(K, vtype=grb.GRB.BINARY, name="z")
 
@@ -213,12 +403,10 @@ def build_model(G, settings):
     """ Now the tricky constraints """
     y = grb.tupledict()
 
-    break_symmetry = settings["add_symmetry_breaking"]
     if break_symmetry:
         for k in range(len(K) - 1):
             model.addConstr(z[k] >= z[k + 1])
 
-    init_paths = settings["init_paths"]
     for (u, v) in G.vertex_pairs:
         if (u, v) in init_paths:
             paths = init_paths[u, v]
@@ -243,19 +431,17 @@ def build_model(G, settings):
     model._y = y
     model._z = z
     model._G = G
-    model._settings = settings
 
-    if not settings["GRB_verbose"]:
-        model.Params.OutputFlag = settings["GRB_verbose"]
+    model.Params.OutputFlag = gurobi_verbose
 
-    if settings["add_clique_cuts"] :
+    if add_clique_cuts:
         model.Params.LazyConstraints = 1
 
-    if settings["GRB_symmetry_breaking"] :
+    if gurobi_break_symmetry:
         model.Params.Symmetry = 2
 
-    if settings["timeout"] is not None :
-        model.Params.TimeLimit = settings["timeout"]
+    if timeout is not None:
+        model.Params.TimeLimit = timeout
 
     ## !!!
     model.Params.Method = 1 # Dual simplex--no barrier!
@@ -264,8 +450,15 @@ def build_model(G, settings):
     return model
 
 
-def add_color(model):
-    """ Add a color to the color palette (for bottom up)
+def add_color(model, break_symmetry=True):
+    """ Add a color to the color palette (for bottom up).
+
+    Args:
+        model (gurobipy.Model):
+            IP model. Must have attached graph, variables, etc.
+        break_symmetry (bool, optional):
+            If True, adds a symmetry breaking constraint of the form z_k <=
+            z_{k+1} for the new colors.
     """
     # Add color to palette
     model._K = range(len(model._K) + 1)
@@ -285,7 +478,8 @@ def add_color(model):
         model.addConstr(model._x[u, v, K-1] <= model._z[K-1])
 
     # Add new symmetry breaking constraint
-    model.addConstr(model._z[K-2] >= model._z[K-1])
+    if break_symmetry:
+        model.addConstr(model._z[K-2] >= model._z[K-1])
 
     # Add |P| new "big-M" path constraints
     for (u, v) in model._G.vertex_pairs:
@@ -317,19 +511,19 @@ def clique_callback(model, where):
     # At this point, we have an optimal LP solution at this node
     G = model._G
 
-    for k in model._K :
+    for k in model._K:
         vbs = {(u, v): model._x[u, v, k] for (u, v) in G.ordered_edges}
         xk = model.cbGetNodeRel(vbs)
         totalWeight = 0
-        if sum(xk.values()) <= 1 :
+        if sum(xk.values()) <= 1:
             continue
-        if model._settings["clique_method"] == "brute" :
+        if model._clique_method == "brute":
             totalWeight, constr = clique.enumerate_best_clique(G.aux_cut_graph, xk)
-        elif model._settings["clique_method"] == "ostergard" :
+        elif model._clique_method == "ostergard":
             totalWeight, constr = clique.max_clique_ostergard(G, weights=xk, scale=10000)
-        elif model._settings["clique_method"] == "ILS_VND" :
+        elif model._clique_method == "ILS_VND":
             totalWeight, constr = clique.max_clique_ILS_VND(G, weights=xk, scale=10000, iterations=10)
-        if totalWeight > 1 + 1e-8 :
+        if totalWeight > 1 + 1e-8:
             model.cbLazy(grb.quicksum(model._x[u,v,k] for (u,v) in constr) <= 1)
 
     return
@@ -351,11 +545,11 @@ def bottom_up_clique_callback(model, where):
         totalWeight = 0
         if sum(xk.values()) <= 1 :
             continue
-        if model._settings["clique_method"] == "brute" :
+        if model._clique_method == "brute" :
             totalWeight, constr = clique.enumerate_best_clique(G.aux_cut_graph, xk)
-        elif model._settings["clique_method"] == "ostergard" :
+        elif model._clique_method == "ostergard" :
             totalWeight, constr = clique.max_clique_ostergard(G, weights=xk, scale=10000)
-        elif model._settings["clique_method"] == "ILS_VND" :
+        elif model._clique_method == "ILS_VND" :
             totalWeight, constr = clique.max_clique_ILS_VND(G, weights=xk, scale=10000, iterations=10)
         if totalWeight > 1 + 1e-8 :
             model.cbLazy(grb.quicksum(model._x[u,v,k] for (u,v) in constr) <= 1)
@@ -368,85 +562,73 @@ def bottom_up_no_cut_callback(model, where):
     return
 
 
-def check_settings(G, settings):
-    """ Check the provided settings dictionary for errors and fill in defaults.
+def fix_initial_edge_set(
+    G,
+    fix_method="clique",
+    clique_method="ostergard",
+    ils_vnd_iterations=10,
+    clique_scale=10000,
+):
+    """ Compute a set of edges which must all be different colors in any valid
+    strong rainbow coloring of G.
 
     Args:
-        G (networkx.Graph):
-            Simple connected graph.
-        settings (dict):
-            Dictionary containing settings options.
+        G (Graph):
+            The graph.
+        fix_method (str, optional):
+            The method used to compute the edge set. Must be one of the
+            following:
+            - `lusp`: Fix every edge in a longest unique shortest path.
+            - `clique`: Fix every edge corresponding to a clique in the
+              auxiliary graph H.
+            Default is `clique`. 
+        clique_method (str, optional):
+            Method used to find cliques in the auxiliary graph H. Ignored
+            unless fix_method is `clique`. Must be one of the following:
+            - `brute`: Enumerate all cliques by brute force and select the
+              largest one.
+            - `ostergard`: Find the largest clique using the branch-and-bound
+              method of Ostergard (aka cliquer).
+            - `ILS_VND`: Heuristically look for the largest clique using the
+              ILS_VND heuristic.
+            Default is `ostergard`.
+        ils_vnd_iterations (int, optional):
+            Number of ILS_VND iterations to perform. Ignored unless
+            clique_method is `ILS_VND`. Default is 10.
+        clique_scale (int, optional):
+            Amount to scale edge weight by before casting to integers in the
+            ostergard/ILS_VND methods (ignored if neither of these methods are
+            used). Default is 10000.
 
     Returns:
-        None.
-
-    Raises:
-        ValueError:
-            If the input is malformed.
+        list:
+            List of edges which must be different colors in any valid strong
+            rainbow coloring.
     """
-    defaults = {
-        "K": G.order() - 1,
-        "init_paths": dict(),  # i.e. all of them
-        "add_symmtery_breaking": True,
-        "GRB_symmtery_breaking": False,
-        "GRB_verbose": True,
-        "init_fix": "clique",
-        "add_clique_cuts": True,
-        "skip_dominated_pairs": True,
-        "clique_method": "ostergard",
-        "timeout": None,
-        "print_solution": False,
-        "num_heur_trials": None,
-        "verbose": True,
-    }
-    for key in defaults:
-        if key not in settings:
-            settings[key] = defaults[key]
-        elif key in settings and settings[key] is None:
-            settings[key] = defaults[key]
+    if clique_method not in ("brute", "ostergard", "ILS_VND"):
+        raise ValueError(f"Unrecognized value `{clique_method}` passed for clique_method")
+    if fix_method not in ("lusp", "clique"):
+        raise ValueError(f"Unrecognized value `{init_fix}` passed for fix_method")
 
-    # Check settings here
-    if settings["init_fix"].lower() not in ["lusp", "clique", "none"]:
-        raise ValueError("'init_fix' must be 'lusp', 'clique', or 'none'")
-
-    if settings["clique_method"].lower() not in ["ostergard", "brute", "ils_vnd", "none"]:
-        raise ValueError("'clique_method' must be 'ostergard', 'brute', 'ILS_VND', or 'none'")
-
-
-def graph_preprocessing(G, settings):
-    """ Perform various preprocessing steps required for all solution methods.
-    """
-    # Build auxiliary cut graph, get skip pairs (among other things)
-    if settings["verbose"]:
-        print("Calling prepr.presolve...", end="", flush=True)
-    prepr.presolve(G)
-    if settings["verbose"]:
-        print("done.")
-
-    # Build C/C++ graphs as necessary
-    if settings["clique_method"] == "ILS_VND":
-        G.Hcpp = clique.build_cppgraph(G)
-        G.Hcpp.sort() # Is this necessary?
-    elif settings["clique_method"] == "ostergard":
-        G.Hc = clique.build_c_graph(G)
-
-    # If you want to solve the path with an initial fixing
-    if settings["init_paths"] == "heur":
-        settings["init_paths"] = dict()
-        for (u, v) in G.vertex_pairs:
-            path = nx.shortest_path(G, source=u, target=v) # As nodes
-            settings["init_paths"][u, v] = (path,)
-
-    # Compute clique/lusp bound
-    if settings["init_fix"] == "lusp":
-        G.init_fix = prepr.find_longest_unique_shortest_path(G)
-    elif settings["init_fix"] == "clique":
-        if settings["clique_method"] == "brute":
-            _, G.init_fix = clique.enumerate_best_clique(G.aux_cut_graph)
-        elif settings["clique_method"] == "ostergard" :
-            _, G.init_fix = clique.max_clique_ostergard(G, weights=None, scale=10000)
-        elif settings["clique_method"] == "ILS_VND" :
-            _, G.init_fix = clique.max_clique_ILS_VND(G, weights=None, scale=10000, iterations=10)
+    if fix_method == "lusp":
+        initial_edges = prepr.find_longest_unique_shortest_path(G)
+    elif fix_method == "clique":
+        if clique_method == "brute":
+            _, initial_edges = clique.enumerate_best_clique(G.aux_cut_graph)
+        elif clique_method == "ostergard" :
+            _, initial_edges = clique.max_clique_ostergard(
+                G,
+                weights=None,
+                scale=clique_scale,
+            )
+        elif clique_method == "ILS_VND" :
+            _, initial_edges = clique.max_clique_ILS_VND(
+                G,
+                weights=None,
+                scale=clique_scale,
+                iterations=ils_vnd_iterations,
+            )
+    return initial_edges
 
 
 def graph_statistics(G, verbose=True):
@@ -481,14 +663,6 @@ def graph_statistics(G, verbose=True):
         print(f"Mean paths/vertex pair (after elimination): {num_remaining_paths/len(G.vertex_pairs):.4f}")
         print()
         print("** Does not count single edges as paths")
-
-
-def model_preprocessing(G, model, settings):
-    """ Fix the initial path """
-    if settings["init_fix"].lower() != "none":
-        fix_init_vars(G, model)
-        if settings["verbose"] :
-            print(f"Number of edges fixed by init_fix: {len(G.init_fix)}")
 
 
 def fix_init_vars(G, model):
@@ -539,7 +713,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-x", "--init-fix", type=str, default="clique",
-        choices=["clique", "lusp"],
+        choices=["clique", "lusp", "none"],
         help="Type of initial edge fixing to use. Default is `clique`."
     )
     parser.add_argument(
@@ -574,30 +748,37 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    settings = {
-        "K": args.colors,
-        "heur_bound": args.colors,
-        "init_paths": None,  # None means add all shortest paths
-        "add_symmetry_breaking": not args.no_symmetry,
-        "GRB_symmetry_breaking": False,
-        "init_fix": args.init_fix,
-        "clique_method": args.clique_method,
-        "skip_dominated_pairs": not args.no_skip_pairs,
-        "add_clique_cuts": args.clique_cuts,
-        "GRB_verbose": args.grb_verbose,
-        "timeout": args.timeout,
-        "print_solution": args.print_solution,
-        "num_heur_trials": args.heur_trials,
-        "verbose": args.verbose,
-    }
-
     G = prepr.build_graph_from_file(args.filename)
 
     t0 = time.time()
     if args.method == "bu":
-        srcg = src_bottom_up(G, settings)
+        srcg = src_bottom_up(
+            G,
+            max_time=args.timeout,
+            clique_method=args.clique_method,
+            fix_method=args.init_fix,
+            heuristic_path_fixing=False,
+            gurobi_verbose=args.grb_verbose,
+            verbose=args.verbose,
+            add_clique_cuts=args.clique_cuts,
+            print_computed_solution=args.print_solution,
+            break_symmetry=not args.no_symmetry,
+        )
     else:
-        srcg = src_BnC(G, settings)
+        srcg = src_BnC(
+            G,
+            max_time=args.timeout,
+            clique_method=args.clique_method,
+            fix_method=args.init_fix,
+            heuristic_path_fixing=False,
+            gurobi_verbose=args.grb_verbose,
+            verbose=args.verbose,
+            add_clique_cuts=args.clique_cuts,
+            print_computed_solution=args.print_solution,
+            break_symmetry=not args.no_symmetry,
+            heur_bound=args.colors,
+            num_heur_trials=args.heur_trials,
+        )
     if srcg is not None:
         print(f"src = {srcg:.1f}")
     else:
