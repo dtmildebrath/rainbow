@@ -20,6 +20,35 @@ import random
 import prepr
 
 def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="clique"):
+    """ Compute a valid strong rainbow coloring of G.
+
+    Args:
+        G (Graph):
+            Graph to compute a coloring for. Must have the following attached
+            attributes:
+            - `vertex_pairs`
+            - `ordered_edges`
+            - `diameter`
+        num_trials (int, optional):
+            Number of trials to execute. Default is 3.
+        online_sampling (boolean, optional):
+            If True, randomly samples a shortest path between each pair of
+            vertices as needed. Otherwise, enumerate every shortest path in G
+            before starting the heuristic. Default is False.
+        fmethod (str, optional):
+            Method used to fix an initial set of edges. Must be either `clique`
+            or `path`. If `clique`, a set of edges corresponding to a clique in
+            the auxiliary graph H are fixed. Otherwise, a set of edges in
+            longest shortest path in G are fixed (i.e. a shortest path whose
+            length equals diam(G)). Default is `clique`.
+
+    Returns:
+        dict:
+            Dictionary mapping edges to colors (integers), corresponding to a
+            valid strong rainbow coloring of G.
+        int:
+            The number of colors used in the strong rainbow coloring.
+    """
     required_attrs = ["vertex_pairs", "ordered_edges", "diameter"]
     for attr in required_attrs:
         if not hasattr(G, attr):
@@ -122,6 +151,26 @@ def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="cliqu
 
 
 def _sample_shortest_path(G, source, target):
+    """ Sample a path uniformly at random from the set of shortest paths
+    connecting source and target in G.
+
+    Args:
+        G (Graph):
+            Networkx graph.
+        source (object):
+            Source node. Must be an element of the node set of G.
+        target (object):
+            Target node. Must be an element of the node set of G.
+
+    Returns:
+        list of tuple:
+            Resulting path stored as a list of edge tuples.
+
+    Notes:
+    - Each node in the graph G must have an attached directed acyclic graph
+      (DAG), stored with the key `dag`. The DAG must have an integer `r` stored
+      at each node, corresponding to the number of shortest paths in G.
+    """
     D = G.node[source]["dag"]
     path = list()
     L = tuple(D.predecessors(target))
