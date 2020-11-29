@@ -137,6 +137,7 @@ def src_BnC(
     else:
         K = heur_bound 
 
+    # Build the model
     model = build_model(
         G,
         K,
@@ -708,7 +709,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-k", "--colors", type=int,
-        help="Number of colors to use in the palatte (ignored if using bottom up)."
+        help="Number of colors to use in the palette (ignored if using bottom up)."
     )
     parser.add_argument(
         "-b", "--no-symmetry", action="store_true",
