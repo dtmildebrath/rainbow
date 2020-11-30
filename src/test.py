@@ -130,6 +130,7 @@ def run_tests() :
                 verbose=verbose,
                 break_symmetry=True, # Does this count as naive?
                 heur_bound=heur_bound,
+                skip_dominated_pairs=False,
             )
             end = time.time()
             times[inst]["BnC_naive"] = end-start+heur_time

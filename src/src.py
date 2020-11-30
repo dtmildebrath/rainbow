@@ -35,6 +35,7 @@ def src_BnC(
     add_clique_cuts=False,
     print_computed_solution=False,
     break_symmetry=True,
+    skip_dominated_pairs=True,
     heur_bound=None,
     num_heur_trials=None,
 ):
@@ -80,6 +81,9 @@ def src_BnC(
         break_symmetry (bool, optional):
             If True, add symmetry breaking constraints of the form z_k >=
             z_{k+1} for all colors k. Default is True.
+        skip_dominated_pairs (bool, optional):
+            If True, does not include dominated pairs of vertices in the model.
+            Default is True.
         heur_bound (int, optional):
             Valid upper bound on src(G). If none is specified, an upper bound
             is obtained with the heuristic. Default is None (no bound).
@@ -93,7 +97,7 @@ def src_BnC(
             Returns src(G) is computed successfully, otherwise None.
     """
     start_time = time.time()
-    prepr.presolve(G)
+    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs)
 
     # Build C/C++ graphs as necessary
     if clique_method == "ILS_VND":
@@ -194,6 +198,7 @@ def src_bottom_up(
     add_clique_cuts=False,
     print_computed_solution=False,
     break_symmetry=True,
+    skip_dominated_pairs=True,
 ):
     """ Compute src(G) for the specified graph using the "bottom-up" approach.
 
@@ -237,13 +242,16 @@ def src_bottom_up(
         break_symmetry (bool, optional):
             If True, add symmetry breaking constraints of the form z_k >=
             z_{k+1} for all colors k. Default is True.
+        skip_dominated_pairs (bool, optional):
+            If True, does not include dominated pairs of vertices in the model.
+            Default is True.
 
     Returns:
         float or None:
             Returns src(G) is computed successfully, otherwise None.
     """
     start_time = time.time()
-    prepr.presolve(G)
+    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs)
 
     # Build C/C++ graphs as necessary
     if clique_method == "ILS_VND":
@@ -636,7 +644,7 @@ def fix_initial_edge_set(
 
 
 def graph_statistics(G, verbose=True):
-    prepr.presolve(G)
+    prepr.presolve(G, skip_dominated_pairs=True)
 
     num_total_paths = sum(G.path_counts.values())
     num_remaining_paths = sum(G.path_counts[u, v] for (u, v) in G.vertex_pairs)
@@ -767,6 +775,7 @@ if __name__ == "__main__":
             add_clique_cuts=args.clique_cuts,
             print_computed_solution=args.print_solution,
             break_symmetry=not args.no_symmetry,
+            skip_dominated_pairs=not args.no_skip_pairs,
         )
     else:
         srcg = src_BnC(
@@ -780,6 +789,7 @@ if __name__ == "__main__":
             add_clique_cuts=args.clique_cuts,
             print_computed_solution=args.print_solution,
             break_symmetry=not args.no_symmetry,
+            skip_dominated_pairs=not args.no_skip_pairs,
             heur_bound=args.colors,
             num_heur_trials=args.heur_trials,
         )
