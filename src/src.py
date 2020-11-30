@@ -738,7 +738,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-z", "--clique-method", type=str, default="ostergard",
-        choices=["ostergard", "brute", "none"],
+        choices=["ostergard", "brute"],
         help="Method to use for computing cliques in auxiliary graph H. Default is `ostergard`"
     )
     parser.add_argument(
