@@ -22,7 +22,7 @@ import itertools
 
 from collections import deque
 
-def presolve(G, skip_dominated_pairs=True):
+def presolve(G, skip_dominated_pairs=True, verbose=False):
     """ Compute DAGs, auxiliary graph, and other graph parameters used when
     computing src(G).
 
@@ -36,6 +36,8 @@ def presolve(G, skip_dominated_pairs=True):
             If True, G.vertex_pairs does not include pairs of vertices which do
             not need to be explicitly enforced to be rainbow connected in the
             IP model. Default is True.
+        verbose (bool, optional):
+            If True, displays progress. Default is False.
     
     Returns:
         None
@@ -61,7 +63,11 @@ def presolve(G, skip_dominated_pairs=True):
             G.node[u]["r"][v] is the number of shortest u-v paths in G. 
     """
     # Build the (single source) DAGs
+    if verbose:
+        print("Building auxiliary DAG graphs...", end="", flush=True)
     _dag_prep(G)
+    if verbose:
+        print("done.")
     G.ordered_edges = get_ordered_edges(G)
 
     # All non-adjacent vertex pairs (u, v) in G
@@ -78,6 +84,8 @@ def presolve(G, skip_dominated_pairs=True):
     path_counts = {(u, v): 0 for (u, v) in v_pairs}
 
     # Iterate over pairs and compute edges
+    if verbose:
+        print("Computing cut vertices and edges for each vertex pair...", end="", flush=True)
     for (source, sink) in v_pairs:
         path_count, cut_edges, cut_vertices = _presolve_helper(G, source, sink)
         path_counts[source, sink] = path_count
@@ -92,13 +100,19 @@ def presolve(G, skip_dominated_pairs=True):
                     skip_pairs[min(source, v), max(source, v)] = True
                 if sink not in G.neighbors(v):
                     skip_pairs[min(sink, v), max(sink, v)] = True
+    if verbose:
+        print("done.")
 
     remaining_pairs = tuple(pair for pair in v_pairs if pair not in skip_pairs)
 
     # Build graph object
+    if verbose:
+        print("Building auxiliary graph H...", end="", flush=True)
     H = nx.Graph()
     H.add_nodes_from(G.ordered_edges)
     H.add_edges_from(H_edges.keys())
+    if verbose:
+        print("done.")
 
     # Attach the results (do not return)
     G.path_counts = path_counts

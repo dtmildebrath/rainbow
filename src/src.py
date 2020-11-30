@@ -97,7 +97,7 @@ def src_BnC(
             Returns src(G) is computed successfully, otherwise None.
     """
     start_time = time.time()
-    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs)
+    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs, verbose=verbose)
 
     # Build C/C++ graphs as necessary
     if clique_method == "ILS_VND":
@@ -142,6 +142,8 @@ def src_BnC(
         K = heur_bound 
 
     # Build the model
+    if verbose:
+        print("Building Gurobi IP model...", end="", flush=True)
     model = build_model(
         G,
         K,
@@ -151,6 +153,8 @@ def src_BnC(
         add_clique_cuts=add_clique_cuts,
         gurobi_break_symmetry=False,
     )
+    if verbose:
+        print("done.")
 
     # Fix the initial set of edges
     if fix_method.lower() != "none":
@@ -164,6 +168,8 @@ def src_BnC(
 
     if gurobi_verbose:
         print("\n################## BEGIN GUROBI OUTPUT #########################")
+    elif verbose:
+        print("Beginning IP solve...", end="", flush=True)
 
     time_elapsed = time.time() - start_time
     time_remaining = max(0, max_time - time_elapsed)
@@ -176,6 +182,8 @@ def src_BnC(
 
     if gurobi_verbose:
         print("################### END GUROBI OUTPUT ##########################\n")
+    elif verbose:
+        print("done.")
 
     ## THIS IS IMPORTANT! (Leaks otherwise)
     if clique_method == "ostergard":
@@ -251,7 +259,7 @@ def src_bottom_up(
             Returns src(G) is computed successfully, otherwise None.
     """
     start_time = time.time()
-    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs)
+    prepr.presolve(G, skip_dominated_pairs=skip_dominated_pairs, verbose=verbose)
 
     # Build C/C++ graphs as necessary
     if clique_method == "ILS_VND":
@@ -279,6 +287,8 @@ def src_bottom_up(
 
     K = max(len(G.init_fix), G.diameter)
 
+    if verbose:
+        print("Building Gurobi IP model...", end="", flush=True)
     model = build_model(
         G,
         K,
@@ -288,6 +298,8 @@ def src_bottom_up(
         add_clique_cuts=add_clique_cuts,
         gurobi_break_symmetry=False,
     )
+    if verbose:
+        print("done.")
 
     # Fix the initial set of edges
     if fix_method.lower() != "none":
@@ -310,7 +322,7 @@ def src_bottom_up(
             print(f"################################################################")
             print("\n################## BEGIN GUROBI OUTPUT #########################")
         elif verbose:
-            print("Beginning iteration", i)
+            print(f"Beginning iteration {i}...", end="", flush=True)
 
         if add_clique_cuts:
             model.optimize(bottom_up_clique_callback)
@@ -319,6 +331,8 @@ def src_bottom_up(
 
         if gurobi_verbose:
             print("################### END GUROBI OUTPUT ##########################\n")
+        elif verbose:
+            print("done.")
 
         sol_found = model.SolCount > 0
         if not sol_found:
@@ -644,7 +658,7 @@ def fix_initial_edge_set(
 
 
 def graph_statistics(G, verbose=True):
-    prepr.presolve(G, skip_dominated_pairs=True)
+    prepr.presolve(G, skip_dominated_pairs=True, verbose=verbose)
 
     num_total_paths = sum(G.path_counts.values())
     num_remaining_paths = sum(G.path_counts[u, v] for (u, v) in G.vertex_pairs)
