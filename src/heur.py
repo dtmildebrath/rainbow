@@ -20,14 +20,43 @@ import random
 import prepr
 
 def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="clique"):
+    """ Compute a valid strong rainbow coloring of G.
+
+    Args:
+        G (Graph):
+            Graph to compute a coloring for. Must have the following attached
+            attributes:
+            - `vertex_pairs`
+            - `ordered_edges`
+            - `diameter`
+        num_trials (int, optional):
+            Number of trials to execute. Default is 3.
+        online_sampling (boolean, optional):
+            If True, randomly samples a shortest path between each pair of
+            vertices as needed. Otherwise, enumerate every shortest path in G
+            before starting the heuristic. Default is False.
+        fmethod (str, optional):
+            Method used to fix an initial set of edges. Must be either `clique`
+            or `path`. If `clique`, a set of edges corresponding to a clique in
+            the auxiliary graph H are fixed. Otherwise, a set of edges in
+            longest shortest path in G are fixed (i.e. a shortest path whose
+            length equals diam(G)). Default is `clique`.
+
+    Returns:
+        dict:
+            Dictionary mapping edges to colors (integers), corresponding to a
+            valid strong rainbow coloring of G.
+        int:
+            The number of colors used in the strong rainbow coloring.
+    """
     required_attrs = ["vertex_pairs", "ordered_edges", "diameter"]
     for attr in required_attrs:
         if not hasattr(G, attr):
             raise RuntimeError(
                 f"Graph must have a '{attr}' attribute before running path fixing heuristic"
             )
-    if fmethod not in ("clique", "path"):
-        raise ValueError("fmethod must `clique` or `path`")
+    if fmethod not in ("clique", "lusp"):
+        raise ValueError("fmethod must `clique` or `lusp`")
 
     best_bound = G.size()+1
     best_paths = {pair:0 for pair in G.vertex_pairs}
@@ -66,7 +95,7 @@ def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="cliqu
                 path_ix = random.randint(0, len(shortest_paths[u,v])-1)
                 path_fixing[u,v] = shortest_paths[u,v][path_ix]
 
-        if fmethod == "path":
+        if fmethod == "lusp":
             # Fix colors along some longest path
             for (u,v) in G.vertex_pairs:
                 if len(path_fixing[u,v]) == diam:
@@ -122,6 +151,26 @@ def path_fixing_heuristic(G, num_trials=3, online_sampling=False, fmethod="cliqu
 
 
 def _sample_shortest_path(G, source, target):
+    """ Sample a path uniformly at random from the set of shortest paths
+    connecting source and target in G.
+
+    Args:
+        G (Graph):
+            Networkx graph.
+        source (object):
+            Source node. Must be an element of the node set of G.
+        target (object):
+            Target node. Must be an element of the node set of G.
+
+    Returns:
+        list of tuple:
+            Resulting path stored as a list of edge tuples.
+
+    Notes:
+    - Each node in the graph G must have an attached directed acyclic graph
+      (DAG), stored with the key `dag`. The DAG must have an integer `r` stored
+      at each node, corresponding to the number of shortest paths in G.
+    """
     D = G.node[source]["dag"]
     path = list()
     L = tuple(D.predecessors(target))
@@ -142,6 +191,7 @@ if __name__ == "__main__":
     import src
     import argparse
     import math
+    import clique
 
     parser = argparse.ArgumentParser(
         description="Produce a valid strong rainbow coloring of G, which is an upper bound on src(G)"
@@ -158,7 +208,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-x", "--init-fix", type=str, default="clique",
-        choices=["clique", "path"],
+        choices=["clique", "lusp", "none"],
         help="Type of initial edge fixing to use. Default is `clique`."
     )
     parser.add_argument(
@@ -173,21 +223,25 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    settings = {
-        "clique_method": "ostergard" if args.init_fix == "clique" else None,
-        "init_fix": args.init_fix,
-        "init_paths": None,
-    }
-
+    # Prepare the graph
     G = prepr.build_graph_from_file(args.filename)
     if args.verbose:
         print("Starting preprocessing...", end="", flush=True)
-    src.graph_preprocessing(G, settings)
+    prepr.presolve(G)
+    G.Hc = clique.build_c_graph(G)
+    G.init_fix = src.fix_initial_edge_set(
+        G,
+        fix_method=args.init_fix,
+        clique_method="ostergard" if args.init_fix == "clique" else None,
+    )
     if args.verbose:
         print("done.")
 
     if args.trials is None:
         args.trials = math.ceil(G.order() / 5)
+
+    if args.init_fix == "clique":
+        clique.free_graph(G.Hc)
 
     start = time.time()
     cmap, rc = path_fixing_heuristic(

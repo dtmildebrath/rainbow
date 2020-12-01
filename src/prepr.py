@@ -22,21 +22,52 @@ import itertools
 
 from collections import deque
 
-def presolve(G):
-    """ Master function which does all of the preprocessing.
-        Attaches the following to G:
+def presolve(G, skip_dominated_pairs=True, verbose=False):
+    """ Compute DAGs, auxiliary graph, and other graph parameters used when
+    computing src(G).
 
-        - a DAG object at each node in G
-        - ordered_edges (list of tuples): all edges (u, v) in G so that u < v 
-        - path_counts (dict): maps non-adjacent vertex pairs (u, v) to the
-          number of shortest paths between u and v in G
-        - aux_cut_graph (Graph): The auxiliary graph H
-        - vertex_pairs (tuple of tuples): The vertex pairs which must be
-          considered for src (after removals)
-        - diameter (int): The diameter of the graph G
+    This function does a lot of things, because many of them are tightly
+    coupled.
+
+    Args:
+        G (Graph):
+            A simple, connected graph.
+        skip_dominated_pairs (bool, optional):
+            If True, G.vertex_pairs does not include pairs of vertices which do
+            not need to be explicitly enforced to be rainbow connected in the
+            IP model. Default is True.
+        verbose (bool, optional):
+            If True, displays progress. Default is False.
+    
+    Returns:
+        None
+
+    Attaches to G:
+        ordered_edges (list of tuple):
+            List of all edges (u, v) in E(G) with u < v.
+        path_counts (dict):
+            A map from non-adjacent vertex pairs (u, v) to the number of
+            shortest paths between u and v in G.
+        aux_cut_graph (Graph):
+            The auxiliary graph H (whose nodes correspond to edges of G).
+        vertex_pairs (tuple of tuple):
+            The pairs of vertices which must be explicitly considered when
+            computing src(G) (i.e. vertex pairs after removals).
+        diameter (int):
+            The diameter of the graph G.
+
+    Attaches to each node u in G:
+        dag (DiGraph):
+            The directed graph rooted at node u.
+        r (dict):
+            G.node[u]["r"][v] is the number of shortest u-v paths in G. 
     """
     # Build the (single source) DAGs
+    if verbose:
+        print("Building auxiliary DAG graphs...", end="", flush=True)
     _dag_prep(G)
+    if verbose:
+        print("done.")
     G.ordered_edges = get_ordered_edges(G)
 
     # All non-adjacent vertex pairs (u, v) in G
@@ -53,26 +84,35 @@ def presolve(G):
     path_counts = {(u, v): 0 for (u, v) in v_pairs}
 
     # Iterate over pairs and compute edges
+    if verbose:
+        print("Computing cut vertices and edges for each vertex pair...", end="", flush=True)
     for (source, sink) in v_pairs:
         path_count, cut_edges, cut_vertices = _presolve_helper(G, source, sink)
         path_counts[source, sink] = path_count
-
-        for v in cut_vertices:
-            if source not in G.neighbors(v):
-                skip_pairs[min(source, v), max(source, v)] = True
-            if sink not in G.neighbors(v):
-                skip_pairs[min(sink, v), max(sink, v)] = True
 
         if len(cut_edges) >= 2:
             for (u, v) in itertools.combinations(cut_edges, 2):
                 H_edges[u,v] = True # Value does not matter
 
+        if skip_dominated_pairs:
+            for v in cut_vertices:
+                if source not in G.neighbors(v):
+                    skip_pairs[min(source, v), max(source, v)] = True
+                if sink not in G.neighbors(v):
+                    skip_pairs[min(sink, v), max(sink, v)] = True
+    if verbose:
+        print("done.")
+
     remaining_pairs = tuple(pair for pair in v_pairs if pair not in skip_pairs)
 
     # Build graph object
+    if verbose:
+        print("Building auxiliary graph H...", end="", flush=True)
     H = nx.Graph()
     H.add_nodes_from(G.ordered_edges)
     H.add_edges_from(H_edges.keys())
+    if verbose:
+        print("done.")
 
     # Attach the results (do not return)
     G.path_counts = path_counts
