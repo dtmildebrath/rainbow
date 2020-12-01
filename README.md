@@ -1,6 +1,6 @@
 Copyright 2020 David T. Mildebrath, Logan A. Smith
 
-This code is accomponied by [this paper](https://arxiv.org/abs/2006.02988).
+This code is accompanied by [this paper](https://arxiv.org/abs/2006.02988).
 
 # Strong Rainbow Connection (SRC)
 
